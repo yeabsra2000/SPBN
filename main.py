@@ -110,8 +110,8 @@ def run_single_layer_demo() -> tuple[float, float]:
     )
     updater = LocalBayesianUpdater(
         learning_rate_mu=1e-3,
-        learning_rate_var=1e-3,
-        stability_lambda=1e-3,
+        learning_rate_var=5e-2,
+        stability_lambda=1e-2,
     )
 
     x, target, _ = make_linear_task(batch_size, in_dim, out_dim, noise=0.0, seed=1)
@@ -164,9 +164,9 @@ def run_multilayer_demo() -> tuple[float, float]:
         ProbabilisticBeliefLayer(hidden, out_dim, initial_var=0.05, snr_threshold=threshold),
     ]
     updater = LocalBayesianUpdater(
-        learning_rate_mu=2e-3,
-        learning_rate_var=1e-3,
-        stability_lambda=1e-3,
+        learning_rate_mu=1e-3,
+        learning_rate_var=5e-2,
+        stability_lambda=1e-2,
     )
     trainer = PredictiveCodingTrainer(
         layers, updater, activation="tanh", threshold=threshold

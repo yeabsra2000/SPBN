@@ -112,6 +112,14 @@ class TestLocalBayesianUpdater(unittest.TestCase):
         self.assertGreaterEqual(self.layer.weight_var.min().item(), self.updater.var_min - 1e-9)
         self.assertLessEqual(self.layer.weight_var.max().item(), self.updater.var_max + 1e-9)
 
+    def test_variance_shrinks_with_input_evidence(self) -> None:
+        a = torch.full((self.batch, self.in_dim), 5.0)
+        zero_error = torch.zeros(self.batch, self.out_dim)
+        before = self.layer.weight_var.clone()
+        self.updater.step(self.layer, a, zero_error)
+        self.assertTrue((self.layer.weight_var <= before + 1e-9).all())
+        self.assertTrue((self.layer.weight_var >= self.updater.var_min - 1e-9).all())
+
     def test_batch_size_mismatch_raises(self) -> None:
         bad_error = torch.randn(self.batch + 1, self.out_dim)
         with self.assertRaises(ValueError):
