@@ -8,5 +8,12 @@ uncertainty-gated (SNR) mask.
 
 from .core.layers import ProbabilisticBeliefLayer
 from .core.updates import LocalBayesianUpdater
+from .models import SequentialBeliefNetwork
+from .training.trainer import PredictiveCodingTrainer
 
-__all__ = ["ProbabilisticBeliefLayer", "LocalBayesianUpdater"]
+__all__ = [
+    "ProbabilisticBeliefLayer",
+    "LocalBayesianUpdater",
+    "PredictiveCodingTrainer",
+    "SequentialBeliefNetwork",
+]

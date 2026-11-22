@@ -17,7 +17,7 @@ import torch.nn.functional as F
 
 from spbn_core.core.layers import ProbabilisticBeliefLayer
 from spbn_core.core.updates import LocalBayesianUpdater
-from spbn_core.training.trainer import PredictiveCodingTrainer
+from spbn_core.models import SequentialBeliefNetwork
 
 
 def make_linear_task(
@@ -159,24 +159,26 @@ def run_multilayer_demo() -> tuple[float, float]:
     steps = 500
     threshold = 0.5
 
-    layers = [
-        ProbabilisticBeliefLayer(in_dim, hidden, initial_var=0.05, snr_threshold=threshold),
-        ProbabilisticBeliefLayer(hidden, out_dim, initial_var=0.05, snr_threshold=threshold),
-    ]
+    net = SequentialBeliefNetwork(
+        in_dim,
+        [hidden],
+        out_dim,
+        initial_var=0.05,
+        snr_threshold=threshold,
+        activation="tanh",
+    )
     updater = LocalBayesianUpdater(
         learning_rate_mu=1e-3,
         learning_rate_var=5e-2,
         stability_lambda=1e-2,
     )
-    trainer = PredictiveCodingTrainer(
-        layers, updater, activation="tanh", threshold=threshold
-    )
+    trainer = net.to_trainer(updater)
 
     x, target = make_nonlinear_task(batch_size, in_dim, hidden, out_dim, seed=3)
 
     initial_loss = F.mse_loss(trainer.predict(x), target).item()
     print(f"\nInitial mse        : {initial_loss:.6f}")
-    print(f"Initial compression: {trainer.compression_rate() * 100:.2f}% pruned")
+    print(f"Initial compression: {net.compression_rate() * 100:.2f}% pruned")
 
     print("\nTraining with local predictive-coding error propagation...")
     for step in range(1, steps + 1):
@@ -185,7 +187,7 @@ def run_multilayer_demo() -> tuple[float, float]:
             print(f"  step {step:4d} | mse = {loss:.6f}")
 
     final_loss = F.mse_loss(trainer.predict(x), target).item()
-    final_sparsity = trainer.compression_rate()
+    final_sparsity = net.compression_rate()
 
     print("\nResults")
     print(f"  initial mse      : {initial_loss:.6f}")

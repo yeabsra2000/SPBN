@@ -89,6 +89,7 @@ class ProbabilisticBeliefLayer(nn.Module):
         x: torch.Tensor,
         threshold: float | None = None,
         sample: bool = True,
+        mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Run a forward pass.
 
@@ -97,8 +98,10 @@ class ProbabilisticBeliefLayer(nn.Module):
             threshold: SNR gate; defaults to ``self.snr_threshold``.
             sample: If ``True`` (default) use stochastic reparameterized
                 weights; if ``False`` use the expected weights ``mu``.
+            mask: Optional precomputed SNR mask (reused to avoid recomputation).
         """
-        mask = self.get_sparsity_mask(threshold)
+        if mask is None:
+            mask = self.get_sparsity_mask(threshold)
         weights = self.sample_weights() if sample else self.weight_mu
         return F.linear(x, weights * mask)
 

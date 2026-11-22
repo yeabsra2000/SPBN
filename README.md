@@ -12,6 +12,7 @@ An experimental neuromorphic deep learning framework that replaces traditional g
 ```text
 spbn_core/
 │
+├── models.py              # SequentialBeliefNetwork container + save/load
 ├── core/
 │   ├── __init__.py
 │   ├── layers.py          # ProbabilisticBeliefLayer with reparameterization
@@ -24,7 +25,8 @@ spbn_core/
 │
 ├── tests/
 │   ├── test_layer.py      # Unit tests for tensor shapes, sampling, and local updates
-│   └── test_trainer.py    # Unit tests for multi-layer local training
+│   ├── test_trainer.py    # Unit tests for multi-layer local training
+│   └── test_network.py    # Unit tests for the sequential model + save/load
 │
 └── __init__.py
 

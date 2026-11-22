@@ -91,20 +91,25 @@ class PredictiveCodingTrainer:
 
     @torch.no_grad()
     def forward(
-        self, x: torch.Tensor, sample: bool = False
+        self,
+        x: torch.Tensor,
+        sample: bool = False,
+        masks: Sequence[torch.Tensor | None] | None = None,
     ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
         """Return per-layer pre-activations and activations.
 
         ``activations[0]`` is the input ``x`` and ``activations[-1]`` the
         network output. ``pre_activations[i]`` is the linear output of layer
-        ``i`` before the activation function.
+        ``i`` before the activation function. ``masks`` may supply precomputed
+        SNR masks to avoid recomputing them within a training step.
         """
         activations = [x]
         pre_activations: List[torch.Tensor] = []
         last = len(self.layers) - 1
 
         for i, layer in enumerate(self.layers):
-            z = layer(activations[-1], threshold=self.threshold, sample=sample)
+            mask = None if masks is None else masks[i]
+            z = layer(activations[-1], threshold=self.threshold, sample=sample, mask=mask)
             pre_activations.append(z)
             activations.append(self._activate(z, is_last=(i == last)))
 
@@ -116,6 +121,7 @@ class PredictiveCodingTrainer:
         pre_activations: List[torch.Tensor],
         activations: List[torch.Tensor],
         target: torch.Tensor,
+        masks: Sequence[torch.Tensor | None] | None = None,
     ) -> List[torch.Tensor]:
         """Compute the local error for every layer (actual minus prediction)."""
         n = len(self.layers)
@@ -124,7 +130,10 @@ class PredictiveCodingTrainer:
 
         for i in range(n - 2, -1, -1):
             layer = self.layers[i + 1]
-            weights = layer.weight_mu * layer.get_sparsity_mask(self.threshold)
+            mask = None if masks is None else masks[i + 1]
+            if mask is None:
+                mask = layer.get_sparsity_mask(self.threshold)
+            weights = layer.weight_mu * mask
             propagated = errors[i + 1] @ weights
             errors[i] = propagated * self._activate_grad(pre_activations[i], is_last=False)
 
@@ -133,11 +142,12 @@ class PredictiveCodingTrainer:
     @torch.no_grad()
     def train_step(self, x: torch.Tensor, target: torch.Tensor) -> float:
         """Perform one local predictive-coding update; return the MSE loss."""
-        pre_activations, activations = self.forward(x, sample=False)
+        masks = [layer.get_sparsity_mask(self.threshold) for layer in self.layers]
+        pre_activations, activations = self.forward(x, sample=False, masks=masks)
         output = activations[-1]
         loss = F.mse_loss(output, target)
 
-        errors = self.local_errors(pre_activations, activations, target)
+        errors = self.local_errors(pre_activations, activations, target, masks=masks)
         for i, layer in enumerate(self.layers):
             self.updater.step(layer, activations[i], errors[i])
 
