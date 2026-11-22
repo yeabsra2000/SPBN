@@ -1,10 +1,11 @@
-"""Functional training test for the Sparse Probabilistic Belief Network.
+"""Functional training tests for the Sparse Probabilistic Belief Network.
 
-This script trains a :class:`ProbabilisticBeliefLayer` to fit a synthetic
-linear task using *only* local Bayesian belief updates -- no ``loss.backward``
-and no optimizer. It verifies that the local predictive-coding loop reduces
-the prediction error, demonstrates stochastic reparameterized sampling, and
-reports the uncertainty-gated compression rate.
+Two self-verifying demos are run, both using *only* local Bayesian belief
+updates -- no ``loss.backward`` and no optimizer:
+
+1. Single belief layer fitting a synthetic linear task.
+2. Two stacked belief layers fitting a nonlinear teacher network via local
+   predictive-coding error propagation.
 
 Run from the project root with::
 
@@ -16,6 +17,7 @@ import torch.nn.functional as F
 
 from spbn_core.core.layers import ProbabilisticBeliefLayer
 from spbn_core.core.updates import LocalBayesianUpdater
+from spbn_core.training.trainer import PredictiveCodingTrainer
 
 
 def make_linear_task(
@@ -35,6 +37,16 @@ def make_linear_task(
     return x, target, w_true
 
 
+def make_nonlinear_task(batch_size: int, in_dim: int, hidden: int, out_dim: int, seed: int = 3):
+    """Generate targets from a fixed random tanh teacher network."""
+    generator = torch.Generator().manual_seed(seed)
+    x = torch.randn(batch_size, in_dim, generator=generator)
+    w1 = torch.randn(hidden, in_dim, generator=generator) / in_dim**0.5
+    w2 = torch.randn(out_dim, hidden, generator=generator) / hidden**0.5
+    target = torch.tanh(x @ w1.t()) @ w2.t()
+    return x, target
+
+
 @torch.no_grad()
 def mse(layer: ProbabilisticBeliefLayer, x: torch.Tensor, target: torch.Tensor, threshold: float) -> float:
     """Deterministic (expected-weight) mean squared error."""
@@ -43,7 +55,7 @@ def mse(layer: ProbabilisticBeliefLayer, x: torch.Tensor, target: torch.Tensor, 
 
 
 @torch.no_grad()
-def train(
+def train_single_layer(
     layer: ProbabilisticBeliefLayer,
     updater: LocalBayesianUpdater,
     x: torch.Tensor,
@@ -52,11 +64,10 @@ def train(
     steps: int,
     log_every: int = 50,
 ):
-    """Run the non-backprop local predictive-coding optimization loop."""
+    """Run the non-backprop local predictive-coding loop for one layer."""
     history = []
     for step in range(1, steps + 1):
-        # Local prediction error uses the "actual minus prediction" convention
-        # required by the local Bayesian update rule: e = target - prediction.
+        # Local error uses "actual minus prediction": e = target - prediction.
         prediction = layer.expected_forward(x, threshold=threshold)
         local_error = target - prediction
         loss = F.mse_loss(prediction, target)
@@ -73,19 +84,16 @@ def train(
 @torch.no_grad()
 def sampling_report(layer: ProbabilisticBeliefLayer, x: torch.Tensor, threshold: float) -> None:
     """Show that forward passes are stochastic (sampled synaptic weights)."""
-    samples = torch.stack(
-        [layer(x, threshold=threshold, sample=True) for _ in range(64)]
-    )
+    samples = torch.stack([layer(x, threshold=threshold, sample=True) for _ in range(64)])
     print(f"  sample output mean: {samples.mean().item():+.4f}")
     print(f"  sample output std : {samples.std().item():.4f} (stochastic synapses)")
 
 
-def main() -> None:
-    print("=" * 62)
-    print(" Sparse Probabilistic Belief Network -- local training test")
-    print("=" * 62)
+def run_single_layer_demo() -> tuple[float, float]:
+    print("\n" + "-" * 62)
+    print(" Demo 1: single layer, synthetic linear task")
+    print("-" * 62)
 
-    # ------------------------------------------------------------------ config
     torch.manual_seed(0)
 
     batch_size = 64
@@ -106,7 +114,6 @@ def main() -> None:
         stability_lambda=1e-3,
     )
 
-    # ------------------------------------------------------------- synthetic task
     x, target, _ = make_linear_task(batch_size, in_dim, out_dim, noise=0.0, seed=1)
 
     initial_loss = mse(layer, x, target, threshold)
@@ -114,32 +121,98 @@ def main() -> None:
     print(f"\nInitial mse        : {initial_loss:.6f}")
     print(f"Initial compression: {initial_sparsity * 100:.2f}% pruned")
 
-    # --------------------------------------------------- local belief optimization
     print("\nTraining with local Bayesian belief updates (no backprop)...")
-    history = train(layer, updater, x, target, threshold, steps)
+    train_single_layer(layer, updater, x, target, threshold, steps)
 
     final_loss = mse(layer, x, target, threshold)
     final_sparsity = layer.sparsity_ratio(threshold)
 
-    # ------------------------------------------------------------------- report
     print("\nResults")
-    print(f"  initial mse     : {initial_loss:.6f}")
-    print(f"  final mse       : {final_loss:.6f}")
-    print(f"  error reduction : {(1.0 - final_loss / initial_loss) * 100:.2f}%")
+    print(f"  initial mse      : {initial_loss:.6f}")
+    print(f"  final mse        : {final_loss:.6f}")
+    print(f"  error reduction  : {(1.0 - final_loss / initial_loss) * 100:.2f}%")
     print(f"  final compression: {final_sparsity * 100:.2f}% pruned pathways")
 
     print("\nStochastic forward-pass sampling check")
     sampling_report(layer, x, threshold)
 
-    # --------------------------------------------------------------- assertions
     assert torch.isfinite(torch.tensor(final_loss)), "loss became non-finite"
     assert final_loss < initial_loss, (
-        f"local updates failed to reduce error "
-        f"({initial_loss:.6f} -> {final_loss:.6f})"
+        f"local updates failed to reduce error ({initial_loss:.6f} -> {final_loss:.6f})"
     )
     assert 0.0 <= final_sparsity <= 1.0, "invalid sparsity ratio"
 
-    print("\nAll checks passed: the local Bayesian pipeline is functional.")
+    return initial_loss, final_loss
+
+
+def run_multilayer_demo() -> tuple[float, float]:
+    print("\n" + "-" * 62)
+    print(" Demo 2: two belief layers, nonlinear teacher network")
+    print("-" * 62)
+
+    torch.manual_seed(0)
+
+    batch_size = 64
+    in_dim = 8
+    hidden = 16
+    out_dim = 3
+    steps = 500
+    threshold = 0.5
+
+    layers = [
+        ProbabilisticBeliefLayer(in_dim, hidden, initial_var=0.05, snr_threshold=threshold),
+        ProbabilisticBeliefLayer(hidden, out_dim, initial_var=0.05, snr_threshold=threshold),
+    ]
+    updater = LocalBayesianUpdater(
+        learning_rate_mu=2e-3,
+        learning_rate_var=1e-3,
+        stability_lambda=1e-3,
+    )
+    trainer = PredictiveCodingTrainer(
+        layers, updater, activation="tanh", threshold=threshold
+    )
+
+    x, target = make_nonlinear_task(batch_size, in_dim, hidden, out_dim, seed=3)
+
+    initial_loss = F.mse_loss(trainer.predict(x), target).item()
+    print(f"\nInitial mse        : {initial_loss:.6f}")
+    print(f"Initial compression: {trainer.compression_rate() * 100:.2f}% pruned")
+
+    print("\nTraining with local predictive-coding error propagation...")
+    for step in range(1, steps + 1):
+        loss = trainer.train_step(x, target)
+        if step == 1 or step % 100 == 0:
+            print(f"  step {step:4d} | mse = {loss:.6f}")
+
+    final_loss = F.mse_loss(trainer.predict(x), target).item()
+    final_sparsity = trainer.compression_rate()
+
+    print("\nResults")
+    print(f"  initial mse      : {initial_loss:.6f}")
+    print(f"  final mse        : {final_loss:.6f}")
+    print(f"  error reduction  : {(1.0 - final_loss / initial_loss) * 100:.2f}%")
+    print(f"  final compression: {final_sparsity * 100:.2f}% pruned pathways")
+
+    assert torch.isfinite(torch.tensor(final_loss)), "loss became non-finite"
+    assert final_loss < initial_loss, (
+        f"local updates failed to reduce error ({initial_loss:.6f} -> {final_loss:.6f})"
+    )
+    assert 0.0 <= final_sparsity <= 1.0, "invalid sparsity ratio"
+
+    return initial_loss, final_loss
+
+
+def main() -> None:
+    print("=" * 62)
+    print(" Sparse Probabilistic Belief Network -- local training tests")
+    print("=" * 62)
+
+    run_single_layer_demo()
+    run_multilayer_demo()
+
+    print("\n" + "=" * 62)
+    print(" All checks passed: the local Bayesian pipeline is functional.")
+    print("=" * 62)
 
 
 if __name__ == "__main__":
