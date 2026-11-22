@@ -14,7 +14,7 @@ spbn_core/
 │
 ├── core/
 │   ├── __init__.py
-│   ├── layers.py          # Custom ProbabilisticBeliefLayer with reparameterization
+│   ├── layers.py          # ProbabilisticBeliefLayer with reparameterization
 │   ├── sparsity.py        # Dynamic uncertainty mask & compression gates
 │   └── updates.py         # Local Bayesian belief-updating mechanics
 │
@@ -23,6 +23,26 @@ spbn_core/
 │   └── trainer.py         # Non-backprop local predictive optimization loop
 │
 ├── tests/
-│   └── test_layer.py      # Unit tests for tensor shapes, sampling, and local updates
+│   ├── test_layer.py      # Unit tests for tensor shapes, sampling, and local updates
+│   └── test_trainer.py    # Unit tests for multi-layer local training
 │
-└── main.py                # Entry point for running toy benchmarks (e.g., MNIST/Synthetic)
+└── __init__.py
+
+main.py                    # Entry point for running toy benchmarks (e.g., MNIST/Synthetic)
+```
+
+## Quickstart
+```bash
+pip install torch
+
+python main.py                                          # run training demos
+python -m unittest discover -s spbn_core/tests -v       # run the test suite
+```
+
+## Implementation Status
+- [x] Probabilistic belief layer with reparameterized sampling and SNR gating
+- [x] Local Bayesian belief updater (no global backprop / no optimizer)
+- [x] Uncertainty-gated sparsity and compression helpers
+- [x] Multi-layer local predictive-coding trainer
+- [x] Unit tests and single/multi-layer training demos
+- [ ] MNIST / real-dataset benchmark
