@@ -1,7 +1,19 @@
 # Sparse Probabilistic Belief Network (SPBN)
 
 ## Project Vision
-An experimental neuromorphic deep learning framework that replaces traditional global backpropagation and static floating-point weights with **local Bayesian belief-updating distributions** ($\mu, \sigma^2$), **predictive coding error correction**, and **event-driven structural sparsity** (dynamic uncertainty-gated pruning).
+An experimental research prototype that **explores** replacing traditional
+global backpropagation and static floating-point weights with **local Bayesian
+belief-updating distributions** ($\mu, \sigma^2$), **predictive coding error
+correction**, and **event-driven structural sparsity** (dynamic
+uncertainty-gated pruning). It is a learning/research project, not a
+production or drop-in replacement for backprop.
+
+## Key Findings (MNIST, 784 → 128 → 10, 3 seeds, 3 epochs)
+- No-backprop SPBN reaches **94.1% ± 0.3** test accuracy while pruning **58%** of pathways.
+- It **matches Bayes by Backprop** (93.9% ± 0.2) while running **~2.6x faster**.
+- It is still **~2.4–2.8 points behind** deterministic backprop (96.5–96.9%).
+- The original error-based variance rule collapses to **100% pruning / 35.6% accuracy**; the posterior-precision rule is essential.
+- Pruning ~58% costs ~0.6 points; aggressive pruning (>90%) costs several points.
 
 ## Core Architectural Pillars
 1. **Probabilistic Synapses:** Every connection parameter is modeled as a normal distribution $\mathcal{N}(\mu, \sigma^2)$ rather than a static scalar.
@@ -40,7 +52,7 @@ main.py                    # Entry point for running toy benchmarks (e.g., MNIST
 
 ## Quickstart
 ```bash
-pip install torch torchvision
+pip install -r requirements.txt
 
 python main.py                                          # run training demos
 python -m unittest discover -s spbn_core/tests -v       # run the test suite
