@@ -57,15 +57,18 @@ Same 784 -> 128 -> 10 architecture and MSE-on-one-hot objective, 3 seeds, 3 epoc
 
 | Method | Test accuracy | Pruned | Params | Time |
 |---|---|---|---|---|
-| SPBN (pruned, threshold 0.1) | 94.13% ± 0.30 | 57.9% | 203,264 | 13.8s |
-| SPBN (no pruning) | 94.72% ± 0.07 | 0.0% | 203,264 | 13.8s |
-| MLP backprop (MSE) | 96.49% ± 0.12 | 0.0% | 101,770 | 6.1s |
-| MLP backprop (cross-entropy) | 96.88% ± 0.14 | 0.0% | 101,770 | 5.6s |
+| SPBN (pruned, threshold 0.1) | 94.13% ± 0.30 | 57.9% | 203,264 | 13.2s |
+| SPBN (no pruning) | 94.72% ± 0.07 | 0.0% | 203,264 | 13.6s |
+| MLP backprop (MSE) | 96.49% ± 0.12 | 0.0% | 101,770 | 11.3s |
+| MLP backprop (cross-entropy) | 96.88% ± 0.14 | 0.0% | 101,770 | 9.7s |
+| Bayes by Backprop (MSE) | 93.88% ± 0.18 | 0.0% | 203,402 | 34.4s |
 
-**Takeaway:** local Bayesian updates land ~2.4–2.8 points behind backprop at
-this scale, pruning costs ~0.6 points, and the belief network uses ~2x the
-parameters and ~2.3x wall-clock. This is a functional research prototype, not
-a drop-in replacement for backprop.
+**Takeaway:** SPBN is competitive with Bayes by Backprop — the closest
+probabilistic-weight baseline — while pruning 58% of pathways and running
+~2.6x faster. It remains ~2.4–2.8 points behind deterministic backprop at this
+scale. This is a functional research prototype, not a drop-in replacement for
+backprop. (Bayes by Backprop was tuned lightly on a subset; treat its number as
+indicative.)
 
 ## Implementation Status
 - [x] Probabilistic belief layer with reparameterized sampling and SNR gating
@@ -74,4 +77,4 @@ a drop-in replacement for backprop.
 - [x] Multi-layer local predictive-coding trainer
 - [x] Unit tests and single/multi-layer training demos
 - [x] MNIST benchmark (~94.1% ± 0.3 with ~58% pathways pruned)
-- [x] Multi-seed baseline comparison against backprop
+- [x] Multi-seed baseline comparison vs backprop and Bayes by Backprop

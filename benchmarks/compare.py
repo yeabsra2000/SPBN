@@ -6,6 +6,7 @@ and the same MSE-on-one-hot objective, averaged over multiple seeds:
   * SPBN (local Bayesian updates, uncertainty-gated pruning)
   * SPBN without pruning (threshold = 0)
   * MLP trained with Adam + backprop (reference: MSE and cross-entropy)
+  * Bayes by Backprop (Blundell et al., 2015), a probabilistic-weight baseline
 
 Usage (from the project root)::
 
@@ -15,6 +16,7 @@ Usage (from the project root)::
 """
 
 import argparse
+import math
 import statistics
 import time
 
@@ -29,6 +31,53 @@ from spbn_core.models import SequentialBeliefNetwork
 
 def _count_params(module: nn.Module) -> int:
     return sum(p.numel() for p in module.parameters())
+
+
+class BayesianLinear(nn.Module):
+    """Linear layer with a diagonal Gaussian posterior over its weights.
+
+    Implements the Bayes by Backprop reparameterization
+    ``w = mu + softplus(rho) * eps`` and exposes its KL divergence to a
+    zero-mean Gaussian prior.
+    """
+
+    def __init__(self, in_features: int, out_features: int, prior_var: float = 0.1):
+        super().__init__()
+        self.prior_var = prior_var
+        self.weight_mu = nn.Parameter(torch.empty(out_features, in_features))
+        self.weight_rho = nn.Parameter(torch.empty(out_features, in_features))
+        self.bias = nn.Parameter(torch.zeros(out_features))
+        nn.init.kaiming_uniform_(self.weight_mu, a=math.sqrt(5))
+        nn.init.constant_(self.weight_rho, -5.0)
+
+    def forward(self, x: torch.Tensor, sample: bool = True) -> torch.Tensor:
+        if sample:
+            sigma = F.softplus(self.weight_rho)
+            weight = self.weight_mu + sigma * torch.randn_like(self.weight_mu)
+        else:
+            weight = self.weight_mu
+        return F.linear(x, weight, self.bias)
+
+    def kl(self) -> torch.Tensor:
+        sigma2 = F.softplus(self.weight_rho).square()
+        return 0.5 * torch.sum(
+            (self.weight_mu.square() + sigma2) / self.prior_var
+            - 1.0
+            - torch.log(sigma2 / self.prior_var)
+        )
+
+
+class BayesianMLP(nn.Module):
+    def __init__(self, in_features: int, hidden: int, out_features: int, prior_var: float):
+        super().__init__()
+        self.l1 = BayesianLinear(in_features, hidden, prior_var)
+        self.l2 = BayesianLinear(hidden, out_features, prior_var)
+
+    def forward(self, x: torch.Tensor, sample: bool = True) -> torch.Tensor:
+        return self.l2(torch.tanh(self.l1(x, sample)), sample)
+
+    def kl(self) -> torch.Tensor:
+        return self.l1.kl() + self.l2.kl()
 
 
 @torch.no_grad()
@@ -109,6 +158,37 @@ def train_mlp(
     return acc, 0.0, _count_params(model), elapsed
 
 
+def train_bbb(
+    x_train, y_train, x_test, y_test, *, epochs, hidden, seed, batch_size=64,
+    lr=1e-3, prior_var=0.1, kl_weight=1e-3,
+):
+    """Bayes by Backprop (Blundell et al., 2015) with an MSE likelihood."""
+    torch.manual_seed(seed)
+    model = BayesianMLP(x_train.size(1), hidden, 10, prior_var=prior_var)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    n = x_train.size(0)
+    num_batches = (n + batch_size - 1) // batch_size
+    start_time = time.time()
+    for _ in range(epochs):
+        permutation = torch.randperm(n)
+        for start in range(0, n, batch_size):
+            idx = permutation[start : start + batch_size]
+            xb = x_train[idx]
+            yb = _one_hot(y_train[idx])
+
+            optimizer.zero_grad()
+            nll = F.mse_loss(model(xb, sample=True), yb)
+            loss = nll + kl_weight * model.kl() / num_batches
+            loss.backward()
+            optimizer.step()
+    elapsed = time.time() - start_time
+
+    model.eval()
+    acc = _accuracy(lambda xb: model(xb, sample=False), x_test, y_test)
+    return acc, 0.0, _count_params(model), elapsed
+
+
 def _summarize(name, results):
     accs = [r[0] for r in results]
     comps = [r[1] for r in results]
@@ -131,6 +211,9 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--hidden", type=int, default=128)
     parser.add_argument("--threshold", type=float, default=0.1)
+    parser.add_argument("--bbb-lr", type=float, default=3e-3)
+    parser.add_argument("--bbb-prior-var", type=float, default=1.0)
+    parser.add_argument("--bbb-kl-weight", type=float, default=1e-3)
     parser.add_argument("--train-subset", type=int, default=None)
     parser.add_argument("--test-subset", type=int, default=None)
     args = parser.parse_args()
@@ -167,11 +250,26 @@ def main() -> None:
         train_mlp(x_train, y_train, x_test, y_test, criterion="ce", seed=s, **common)
         for s in seeds
     ]
+    bbb = [
+        train_bbb(
+            x_train,
+            y_train,
+            x_test,
+            y_test,
+            seed=s,
+            lr=args.bbb_lr,
+            prior_var=args.bbb_prior_var,
+            kl_weight=args.bbb_kl_weight,
+            **common,
+        )
+        for s in seeds
+    ]
 
     _summarize("SPBN (pruned)", spbn)
     _summarize("SPBN (no pruning)", spbn_noprune)
     _summarize("MLP backprop (MSE)", mlp_mse)
     _summarize("MLP backprop (CE)", mlp_ce)
+    _summarize("Bayes by Backprop", bbb)
     print("-" * 96)
 
 
