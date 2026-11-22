@@ -32,7 +32,8 @@ spbn_core/
 
 benchmarks/
 ├── mnist.py               # MNIST benchmark (auto-downloads the dataset)
-└── compare.py             # SPBN vs backprop baseline comparison
+├── compare.py             # SPBN vs backprop baseline comparison
+└── ablation.py            # variance-rule and compression ablations
 
 main.py                    # Entry point for running toy benchmarks (e.g., MNIST/Synthetic)
 ```
@@ -45,6 +46,7 @@ python main.py                                          # run training demos
 python -m unittest discover -s spbn_core/tests -v       # run the test suite
 python -m benchmarks.mnist                              # MNIST benchmark (auto-downloads data)
 python -m benchmarks.compare                            # SPBN vs backprop baselines
+python -m benchmarks.ablation                           # variance + compression ablations
 ```
 
 The MNIST benchmark downloads the dataset into `./data/` on first run. If the
@@ -70,6 +72,32 @@ scale. This is a functional research prototype, not a drop-in replacement for
 backprop. (Bayes by Backprop was tuned lightly on a subset; treat its number as
 indicative.)
 
+## Ablations (MNIST)
+
+### Variance update rule (threshold 0.1, 3 seeds, 3 epochs)
+
+| Rule | Test accuracy | Pruned |
+|---|---|---|
+| Posterior precision (current) | 94.13% ± 0.30 | 57.9% |
+| Error-based (original specification) | 35.58% ± 3.82 | 100.0% |
+
+The original rule *shrinks* variance when the error is large. Over training the
+variance collapses, the SNR gate prunes every pathway (100%), and the network
+dies. The posterior-precision rule avoids this collapse — this is the single
+most important correctness fix in the project.
+
+### Accuracy vs compression (posterior rule, 2 seeds)
+
+| SNR threshold | Test accuracy | Pruned |
+|---|---|---|
+| 0.00 | 94.67% ± 0.02 | 0.0% |
+| 0.10 | 94.10% ± 0.36 | 57.9% |
+| 0.20 | 90.34% ± 0.00 | 94.7% |
+| 0.30 | 88.09% ± 0.82 | 98.0% |
+
+Pruning ~58% of pathways costs only ~0.6 points; aggressive pruning (>90%)
+costs several points.
+
 ## Implementation Status
 - [x] Probabilistic belief layer with reparameterized sampling and SNR gating
 - [x] Local Bayesian belief updater (no global backprop / no optimizer)
@@ -78,3 +106,4 @@ indicative.)
 - [x] Unit tests and single/multi-layer training demos
 - [x] MNIST benchmark (~94.1% ± 0.3 with ~58% pathways pruned)
 - [x] Multi-seed baseline comparison vs backprop and Bayes by Backprop
+- [x] Variance-rule and compression ablations

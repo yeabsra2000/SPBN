@@ -92,7 +92,7 @@ def _accuracy(logits_fn, x: torch.Tensor, labels: torch.Tensor, batch_size: int 
 
 def train_spbn(
     x_train, y_train, x_test, y_test, *, epochs, hidden, threshold, seed, batch_size=64,
-    lr_mu=1e-3, lr_var=5e-2, stability_lambda=1e-2, initial_var=0.05,
+    lr_mu=1e-3, lr_var=5e-2, stability_lambda=1e-2, initial_var=0.05, updater=None,
 ):
     torch.manual_seed(seed)
     net = SequentialBeliefNetwork(
@@ -103,11 +103,12 @@ def train_spbn(
         snr_threshold=threshold,
         activation="tanh",
     )
-    updater = LocalBayesianUpdater(
-        learning_rate_mu=lr_mu,
-        learning_rate_var=lr_var,
-        stability_lambda=stability_lambda,
-    )
+    if updater is None:
+        updater = LocalBayesianUpdater(
+            learning_rate_mu=lr_mu,
+            learning_rate_var=lr_var,
+            stability_lambda=stability_lambda,
+        )
     trainer = net.to_trainer(updater)
 
     n = x_train.size(0)
