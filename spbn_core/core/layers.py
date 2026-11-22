@@ -36,7 +36,7 @@ class ProbabilisticBeliefLayer(nn.Module):
         in_features: int,
         out_features: int,
         initial_var: float = 0.01,
-        snr_threshold: float = 0.5,
+        snr_threshold: float = 0.05,
     ) -> None:
         super().__init__()
         self.in_features = in_features
